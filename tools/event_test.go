@@ -28,7 +28,7 @@ func TestGetEventsImpl(t *testing.T) {
 	}
 
 	fc := fake.NewSimpleClientset(&ev)
-	result := getEventsImpl(context.Background(), fc, "prod", "default", 20)
+	result := getEventsImpl(context.Background(), fc, "prod", "default", "", "", 20)
 
 	var r EventListResult
 	if err := json.Unmarshal([]byte(result), &r); err != nil {

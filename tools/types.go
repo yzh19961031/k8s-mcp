@@ -141,6 +141,41 @@ type EventListResult struct {
 	Items     []EventBrief `json:"items"`
 }
 
+// ReplicaSetBrief RS 摘要
+type ReplicaSetBrief struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Desired   int32  `json:"desired"`
+	Ready     int32  `json:"ready"`
+	Available int32  `json:"available"`
+	Age       string `json:"age"`
+}
+
+// ReplicaSetListResult list_replicasets 返回值
+type ReplicaSetListResult struct {
+	Cluster   string           `json:"cluster"`
+	Namespace string           `json:"namespace"`
+	Total     int              `json:"total"`
+	Items     []ReplicaSetBrief `json:"items"`
+}
+
+// ResourceQuotaBrief ResourceQuota 摘要
+type ResourceQuotaBrief struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Age       string            `json:"age"`
+	Hard      map[string]string `json:"hard"`
+	Used      map[string]string `json:"used"`
+}
+
+// ResourceQuotaListResult list_resource_quotas 返回值
+type ResourceQuotaListResult struct {
+	Cluster   string               `json:"cluster"`
+	Namespace string               `json:"namespace"`
+	Total     int                  `json:"total"`
+	Items     []ResourceQuotaBrief `json:"items"`
+}
+
 // ResourceDetail describe_resource 返回值
 type ResourceDetail struct {
 	Cluster   string                 `json:"cluster"`

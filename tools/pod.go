@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -9,10 +10,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 // RegisterPodTools 注册 Pod 相关 MCP 工具
-func RegisterPodTools(s *server.MCPServer, mgr ClusterManagerInterface) {
+func RegisterPodTools(s *server.MCPServer, mgr ResourceManagerInterface) {
 	// list_pods
 	s.AddTool(mcp.NewTool("list_pods",
 		mcp.WithDescription("列出指定集群和命名空间下的 Pod 摘要"),
@@ -74,6 +78,45 @@ func RegisterPodTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
 		return mcp.NewToolResultText(getPodLogsImpl(ctx, client, cluster, namespace, pod, container, tail)), nil
+	})
+
+	// exec_pod
+	s.AddTool(mcp.NewTool("exec_pod",
+		mcp.WithDescription("在指定 Pod 容器内执行命令并返回输出（通过 sh -c 执行）"),
+		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
+		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间")),
+		mcp.WithString("pod", mcp.Required(), mcp.Description("Pod 名称")),
+		mcp.WithString("command", mcp.Required(), mcp.Description("要执行的命令，如 ls /tmp 或 nvidia-smi")),
+		mcp.WithString("container", mcp.Description("容器名称，多容器时必填")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		cluster, ok := args["cluster"].(string)
+		if !ok || cluster == "" {
+			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		}
+		namespace, ok2 := args["namespace"].(string)
+		if !ok2 || namespace == "" {
+			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
+		}
+		pod, ok3 := args["pod"].(string)
+		if !ok3 || pod == "" {
+			return mcp.NewToolResultText(toolError("参数 pod 无效")), nil
+		}
+		command, ok4 := args["command"].(string)
+		if !ok4 || command == "" {
+			return mcp.NewToolResultText(toolError("参数 command 无效")), nil
+		}
+		container, _ := args["container"].(string)
+
+		cfg, err := mgr.GetConfig(cluster)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		client, err := mgr.Get(cluster)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		return mcp.NewToolResultText(execPodImpl(ctx, client, cfg, cluster, namespace, pod, container, command)), nil
 	})
 
 	// describe_pod
@@ -189,6 +232,47 @@ func describePodImpl(ctx context.Context, client kubernetes.Interface, cluster, 
 		Containers: containers,
 		Conditions: conditions,
 	})
+}
+
+func execPodImpl(ctx context.Context, client kubernetes.Interface, cfg *rest.Config, cluster, namespace, pod, container, command string) string {
+	req := client.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(pod).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: container,
+			Command:   []string{"sh", "-c", command},
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, clientgoscheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
+	if err != nil {
+		return toolError(fmt.Sprintf("创建 exec 失败: %v", err))
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	result := map[string]interface{}{
+		"cluster":   cluster,
+		"namespace": namespace,
+		"pod":       pod,
+		"container": container,
+		"command":   command,
+		"stdout":    stdout.String(),
+		"stderr":    stderr.String(),
+	}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	return toJSON(result)
 }
 
 func countReady(p corev1.Pod) (ready, total int32) {

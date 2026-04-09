@@ -125,6 +125,27 @@ func RegisterResourceTools(s *server.MCPServer, mgr ResourceManagerInterface) {
 	})
 }
 
+// wellKnownGroups 为常见资源类型预设 API Group，避免 discovery mapper 因 Group 为空而匹配失败
+var wellKnownGroups = map[string]string{
+	"deployment":              "apps",
+	"replicaset":              "apps",
+	"statefulset":             "apps",
+	"daemonset":               "apps",
+	"controllerrevision":      "apps",
+	"job":                     "batch",
+	"cronjob":                 "batch",
+	"ingress":                 "networking.k8s.io",
+	"networkpolicy":           "networking.k8s.io",
+	"horizontalpodautoscaler": "autoscaling",
+	"poddisruptionbudget":     "policy",
+	"clusterrole":             "rbac.authorization.k8s.io",
+	"clusterrolebinding":      "rbac.authorization.k8s.io",
+	"role":                    "rbac.authorization.k8s.io",
+	"rolebinding":             "rbac.authorization.k8s.io",
+	"storageclass":            "storage.k8s.io",
+	"volumeattachment":        "storage.k8s.io",
+}
+
 // buildDynamic 创建 dynamic client 并解析 kind 对应的 GVR
 func buildDynamic(client kubernetes.Interface, cfg *rest.Config, kind string) (dynamic.Interface, schema.GroupVersionResource, bool, error) {
 	dynClient, err := dynamic.NewForConfig(cfg)
@@ -143,7 +164,8 @@ func buildDynamic(client kubernetes.Interface, cfg *rest.Config, kind string) (d
 	}
 
 	rm := restmapper.NewDiscoveryRESTMapper(groups)
-	mappings, err := rm.RESTMappings(schema.GroupKind{Kind: kind})
+	group := wellKnownGroups[strings.ToLower(kind)]
+	mappings, err := rm.RESTMappings(schema.GroupKind{Group: group, Kind: kind})
 	if err != nil || len(mappings) == 0 {
 		return nil, schema.GroupVersionResource{}, false, fmt.Errorf("找不到 Kind %q 的 REST mapping", kind)
 	}
