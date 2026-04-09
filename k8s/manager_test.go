@@ -1,15 +1,18 @@
 package k8s
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
 // newManagerWithFakes 直接注入 fake client，绕过真实 kubeconfig
-func newManagerWithFakes(clients map[string]kubernetesClient) *ClusterManager {
+func newManagerWithFakes(clients map[string]kubernetes.Interface) *ClusterManager {
 	m := &ClusterManager{
 		clients: clients,
 		errors:  make(map[string]error),
@@ -19,7 +22,7 @@ func newManagerWithFakes(clients map[string]kubernetesClient) *ClusterManager {
 }
 
 func TestListNames(t *testing.T) {
-	m := newManagerWithFakes(map[string]kubernetesClient{
+	m := newManagerWithFakes(map[string]kubernetes.Interface{
 		"prod": fake.NewSimpleClientset(),
 		"dev":  fake.NewSimpleClientset(),
 	})
@@ -37,7 +40,7 @@ func TestListNames(t *testing.T) {
 
 func TestGet_Found(t *testing.T) {
 	fc := fake.NewSimpleClientset()
-	m := newManagerWithFakes(map[string]kubernetesClient{
+	m := newManagerWithFakes(map[string]kubernetes.Interface{
 		"prod": fc,
 	})
 
@@ -51,7 +54,7 @@ func TestGet_Found(t *testing.T) {
 }
 
 func TestGet_NotFound(t *testing.T) {
-	m := newManagerWithFakes(map[string]kubernetesClient{
+	m := newManagerWithFakes(map[string]kubernetes.Interface{
 		"prod": fake.NewSimpleClientset(),
 	})
 
@@ -60,16 +63,55 @@ func TestGet_NotFound(t *testing.T) {
 		t.Fatal("expected error for unknown cluster")
 	}
 	// 错误信息应包含可用集群列表
-	if !containsSubstr(err.Error(), "prod") {
+	if !strings.Contains(err.Error(), "prod") {
 		t.Errorf("error should mention available clusters, got: %v", err)
 	}
 }
 
-func containsSubstr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+func TestGetConfig_Found(t *testing.T) {
+	cfg := &rest.Config{Host: "https://example.com"}
+	m := &ClusterManager{
+		clients: map[string]kubernetes.Interface{},
+		configs: map[string]*rest.Config{"prod": cfg},
+		errors:  make(map[string]error),
 	}
-	return false
+
+	got, err := m.GetConfig("prod")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Host != "https://example.com" {
+		t.Errorf("expected host https://example.com, got %s", got.Host)
+	}
+}
+
+func TestGetConfig_NotFound(t *testing.T) {
+	m := &ClusterManager{
+		clients: map[string]kubernetes.Interface{},
+		configs: make(map[string]*rest.Config),
+		errors:  make(map[string]error),
+	}
+
+	_, err := m.GetConfig("staging")
+	if err == nil {
+		t.Fatal("expected error for unknown cluster")
+	}
+}
+
+func TestListErrors(t *testing.T) {
+	m := &ClusterManager{
+		clients: map[string]kubernetes.Interface{},
+		configs: make(map[string]*rest.Config),
+		errors: map[string]error{
+			"broken": fmt.Errorf("connection refused"),
+		},
+	}
+
+	errs := m.ListErrors()
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errs))
+	}
+	if errs["broken"] != "connection refused" {
+		t.Errorf("unexpected error message: %s", errs["broken"])
+	}
 }

@@ -12,14 +12,9 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// kubernetesClient 接口，便于测试时注入 fake
-type kubernetesClient interface {
-	kubernetes.Interface
-}
-
 // ClusterManager 管理多集群 k8s client
 type ClusterManager struct {
-	clients map[string]kubernetesClient
+	clients map[string]kubernetes.Interface
 	configs map[string]*rest.Config
 	errors  map[string]error
 	mu      sync.RWMutex
@@ -36,14 +31,14 @@ func NewClusterManager(kubeconfigDir string) (*ClusterManager, error) {
 	}
 
 	m := &ClusterManager{
-		clients: make(map[string]kubernetesClient),
+		clients: make(map[string]kubernetes.Interface),
 		configs: make(map[string]*rest.Config),
 		errors:  make(map[string]error),
 	}
 
 	type result struct {
 		name   string
-		client kubernetesClient
+		client kubernetes.Interface
 		config *rest.Config
 		err    error
 	}
