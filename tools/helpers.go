@@ -25,7 +25,7 @@ func ageString(t time.Time) string {
 func toJSON(v interface{}) string {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Sprintf(`{"error":"json marshal failed: %s"}`, err.Error())
+		return toolError("json marshal failed: " + err.Error())
 	}
 	return string(b)
 }

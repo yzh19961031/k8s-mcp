@@ -18,7 +18,7 @@ func TestAgeString(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.expected, func(t *testing.T) {
-			got := ageString(time.Now().Add(-c.dur))
+			got := ageString(time.Now().Add(-c.dur).Add(-100 * time.Millisecond))
 			if got != c.expected {
 				t.Errorf("expected %q, got %q", c.expected, got)
 			}
@@ -37,5 +37,16 @@ func TestToJSON(t *testing.T) {
 	}
 	if m["name"] != "test" {
 		t.Errorf("unexpected value: %v", m)
+	}
+}
+
+func TestToJSONError(t *testing.T) {
+	result := toJSON(make(chan int)) // chan 不可序列化
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &m); err != nil {
+		t.Fatalf("error path produced invalid JSON: %v\noutput: %s", err, result)
+	}
+	if _, ok := m["error"]; !ok {
+		t.Error("expected 'error' key in result")
 	}
 }

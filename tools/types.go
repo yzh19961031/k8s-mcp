@@ -122,14 +122,15 @@ type DeploymentListResult struct {
 
 // EventBrief 事件摘要
 type EventBrief struct {
-	Namespace string `json:"namespace"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Reason    string `json:"reason"`
-	Message   string `json:"message"`
-	Type      string `json:"type"` // Normal | Warning
-	Count     int32  `json:"count"`
-	Age       string `json:"age"`
+	Namespace     string `json:"namespace"`
+	Kind          string `json:"kind"`
+	Name          string `json:"name"`
+	Reason        string `json:"reason"`
+	Message       string `json:"message"`
+	Type          string `json:"type"` // Normal | Warning
+	Count         int32  `json:"count"`
+	Age           string `json:"age"`
+	LastTimestamp string `json:"last_timestamp,omitempty"`
 }
 
 // EventListResult get_events 返回值
