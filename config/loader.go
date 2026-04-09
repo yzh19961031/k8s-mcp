@@ -34,7 +34,15 @@ func LoadKubeconfigs(dir string) (map[string]string, error) {
 	return result, nil
 }
 
+// expandHome 将路径中的 ~ 前缀替换为当前用户的 home 目录。
 func expandHome(path string) string {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return home
+	}
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
