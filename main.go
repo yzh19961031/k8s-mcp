@@ -30,6 +30,7 @@ func main() {
 	tools.RegisterPodTools(s, mgr)
 	tools.RegisterNamespaceTools(s, mgr)
 	tools.RegisterNodeTools(s, mgr)
+	tools.RegisterDeploymentTools(s, mgr)
 
 	log.Printf("k8s-mcp server 启动，已加载集群: %v", mgr.ListNames())
 
