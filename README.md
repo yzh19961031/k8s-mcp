@@ -2,8 +2,6 @@
 
 一个支持**多集群**的 Kubernetes MCP Server，供 [Claude Code](https://claude.ai/code) 通过 stdio 调用，实现对多个 K8s 集群的统一纳管和操作。
 
-> 解决了 `mcp-server-kubernetes` 不支持多集群的痛点。
-
 ---
 
 ## 功能特性
