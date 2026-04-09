@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "k8s": {
+      "command": "/Volumes/data/personal/code/k8s-mcp/k8s-mcp",
+      "args": ["--kubeconfig-dir", "~/.kube/clusters"]
+    }
+  }
+}
