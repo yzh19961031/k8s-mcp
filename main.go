@@ -10,10 +10,11 @@ import (
 )
 
 func main() {
-	kubeconfigDir := flag.String("kubeconfig-dir", "~/.kube/clusters", "kubeconfig 文件目录")
+	kubeconfigDir := flag.String("kubeconfig-dir", "", "kubeconfig 文件目录（可选，文件名即集群名）")
+	tokenConfig := flag.String("token-config", "", "token 配置文件路径（可选，同名集群优先于 kubeconfig）")
 	flag.Parse()
 
-	mgr, err := k8s.NewClusterManager(*kubeconfigDir)
+	mgr, err := k8s.NewClusterManager(*kubeconfigDir, *tokenConfig)
 	if err != nil {
 		log.Fatalf("初始化集群管理器失败: %v", err)
 	}

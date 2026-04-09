@@ -6,7 +6,7 @@
 
 ## 功能特性
 
-- **多集群支持**：通过目录扫描自动加载多个 kubeconfig，并发初始化连接
+- **多集群支持**：支持 kubeconfig 目录扫描和 token 两种接入方式，并发初始化连接
 - **结构化返回**：所有工具返回 JSON 摘要而非原始 K8s 对象，减少 context 污染
 - **13 个 MCP 工具**：覆盖集群查询、Pod 操作、Deployment 管理、事件查看、通用资源操作
 - **只读/写操作分离**：查询类和写操作类工具分开，安全可控
@@ -48,25 +48,44 @@
 
 ## 快速开始
 
-### 1. 准备 kubeconfig
+### 1. 编译
+
+```bash
+git clone https://github.com/yzh19961031/k8s-mcp.git
+cd k8s-mcp
+make build
+```
+
+### 2. 准备集群配置
+
+支持两种接入方式，可单独使用也可同时使用（同名集群 token 优先）。
+
+#### 方式一：kubeconfig 目录
 
 将各集群的 kubeconfig 文件统一放到一个目录，**文件名即为集群名**：
 
 ```bash
 mkdir -p ~/.kube/clusters
 
-# 文件名 = 集群名
 cp /path/to/prod-kubeconfig     ~/.kube/clusters/prod.yaml
 cp /path/to/dev-kubeconfig      ~/.kube/clusters/dev.yaml
-cp /path/to/staging-kubeconfig  ~/.kube/clusters/staging.yaml
 ```
 
-### 2. 编译
+#### 方式二：Token 配置文件
 
-```bash
-git clone https://github.com/yzh19961031/k8s-mcp.git
-cd k8s-mcp
-make build
+新建一个 YAML 文件，列出通过 token 接入的集群：
+
+```yaml
+# ~/.kube/token-clusters.yaml
+clusters:
+  - name: dev
+    server: https://10.0.0.1:6443
+    token: eyJhbGciOiJSUzI1NiIs...
+    insecure_skip_tls_verify: true   # 内网集群可跳过 TLS 验证
+  - name: prod
+    server: https://k8s.example.com:6443
+    token: eyJhbGciOiJSUzI1NiIs...
+    insecure_skip_tls_verify: false  # 生产环境建议关闭
 ```
 
 ### 3. 接入 Claude Code
@@ -78,11 +97,20 @@ make build
   "mcpServers": {
     "k8s": {
       "command": "/path/to/k8s-mcp",
-      "args": ["--kubeconfig-dir", "~/.kube/clusters"]
+      "args": ["--kubeconfig-dir", "~/.kube/clusters", "--token-config", "~/.kube/token-clusters.yaml"]
     }
   }
 }
 ```
+
+两个参数均为可选，按需填写即可：
+
+| 参数 | 说明 | 是否必填 |
+|------|------|---------|
+| `--kubeconfig-dir` | kubeconfig 文件目录 | 可选 |
+| `--token-config` | token 配置文件路径 | 可选 |
+
+> 至少提供一个参数，两者均为空时启动失败。
 
 重启 Claude Code，信任该 MCP Server 后即可使用。
 
@@ -122,7 +150,7 @@ scale_deployment cluster=prod namespace=default name=web replicas=5
 | K8s 客户端 | `k8s.io/client-go` |
 | MCP 框架 | `github.com/mark3labs/mcp-go` |
 | 通信方式 | stdio（Claude Code 标准接入方式） |
-| 配置方式 | 目录扫描多个 kubeconfig 文件 |
+| 配置方式 | kubeconfig 目录 / token 配置文件（两种方式可并用） |
 
 ---
 
@@ -132,7 +160,8 @@ scale_deployment cluster=prod namespace=default name=web replicas=5
 k8s-mcp/
 ├── main.go              # 入口：解析参数、注册工具、启动 MCP Server
 ├── config/
-│   └── loader.go        # kubeconfig 目录扫描
+│   ├── loader.go        # kubeconfig 目录扫描
+│   └── token_loader.go  # token 配置文件解析
 ├── k8s/
 │   └── manager.go       # 多集群连接池（并发初始化、Get/Reload）
 └── tools/

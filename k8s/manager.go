@@ -20,26 +20,49 @@ type ClusterManager struct {
 	mu      sync.RWMutex
 }
 
-// NewClusterManager 扫描 kubeconfigDir，并发初始化所有集群连接
-func NewClusterManager(kubeconfigDir string) (*ClusterManager, error) {
-	kubeconfigs, err := config.LoadKubeconfigs(kubeconfigDir)
-	if err != nil {
-		return nil, err
-	}
-	if len(kubeconfigs) == 0 {
-		return nil, fmt.Errorf("目录 %q 下未找到 kubeconfig 文件（.yaml/.yml）", kubeconfigDir)
-	}
-
+// NewClusterManager 从 kubeconfig 目录和 token 配置文件初始化集群管理器。
+// kubeconfigDir 和 tokenConfigPath 均可为空字符串（表示跳过该来源）。
+// 同名集群 token 配置优先于 kubeconfig。
+func NewClusterManager(kubeconfigDir, tokenConfigPath string) (*ClusterManager, error) {
 	m := &ClusterManager{
 		clients: make(map[string]kubernetes.Interface),
 		configs: make(map[string]*rest.Config),
 		errors:  make(map[string]error),
 	}
 
+	if kubeconfigDir != "" {
+		if err := m.loadFromKubeconfigDir(kubeconfigDir); err != nil {
+			return nil, err
+		}
+	}
+
+	if tokenConfigPath != "" {
+		if err := m.loadFromTokenConfig(tokenConfigPath); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(m.clients)+len(m.errors) == 0 {
+		return nil, fmt.Errorf("未加载到任何集群，请检查 --kubeconfig-dir 或 --token-config 参数")
+	}
+
+	return m, nil
+}
+
+// loadFromKubeconfigDir 扫描目录并发初始化 kubeconfig 集群
+func (m *ClusterManager) loadFromKubeconfigDir(dir string) error {
+	kubeconfigs, err := config.LoadKubeconfigs(dir)
+	if err != nil {
+		return err
+	}
+	if len(kubeconfigs) == 0 {
+		return fmt.Errorf("目录 %q 下未找到 kubeconfig 文件（.yaml/.yml）", dir)
+	}
+
 	type result struct {
 		name   string
 		client kubernetes.Interface
-		config *rest.Config
+		cfg    *rest.Config
 		err    error
 	}
 
@@ -56,7 +79,7 @@ func NewClusterManager(kubeconfigDir string) (*ClusterManager, error) {
 				ch <- result{name: n, err: fmt.Errorf("创建 client 失败: %w", err)}
 				return
 			}
-			ch <- result{name: n, client: client, config: cfg}
+			ch <- result{name: n, client: client, cfg: cfg}
 		}(name, path)
 	}
 
@@ -66,11 +89,31 @@ func NewClusterManager(kubeconfigDir string) (*ClusterManager, error) {
 			m.errors[r.name] = r.err
 		} else {
 			m.clients[r.name] = r.client
-			m.configs[r.name] = r.config
+			m.configs[r.name] = r.cfg
 		}
 	}
+	return nil
+}
 
-	return m, nil
+// loadFromTokenConfig 从 token 配置文件加载集群，同名集群会覆盖 kubeconfig 来的配置
+func (m *ClusterManager) loadFromTokenConfig(path string) error {
+	clusters, err := config.LoadTokenConfig(path)
+	if err != nil {
+		return err
+	}
+	for _, tc := range clusters {
+		cfg := config.TokenClusterToRestConfig(tc)
+		client, err := kubernetes.NewForConfig(cfg)
+		if err != nil {
+			m.errors[tc.Name] = fmt.Errorf("创建 token client 失败: %w", err)
+			continue
+		}
+		// token 优先：覆盖同名 kubeconfig 集群
+		delete(m.errors, tc.Name)
+		m.clients[tc.Name] = client
+		m.configs[tc.Name] = cfg
+	}
+	return nil
 }
 
 // Get 返回指定集群的 client，未找到时返回包含可用集群列表的错误
@@ -126,9 +169,9 @@ func (m *ClusterManager) ListErrors() map[string]string {
 	return errs
 }
 
-// Reload 重新扫描 kubeconfig 目录并更新连接池（不重启服务）
-func (m *ClusterManager) Reload(kubeconfigDir string) error {
-	newMgr, err := NewClusterManager(kubeconfigDir)
+// Reload 重新从所有来源加载并更新连接池（不重启服务）
+func (m *ClusterManager) Reload(kubeconfigDir, tokenConfigPath string) error {
+	newMgr, err := NewClusterManager(kubeconfigDir, tokenConfigPath)
 	if err != nil {
 		return err
 	}
