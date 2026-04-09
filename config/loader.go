@@ -23,11 +23,12 @@ func LoadKubeconfigs(dir string) (map[string]string, error) {
 			continue
 		}
 		name := e.Name()
-		ext := strings.ToLower(filepath.Ext(name))
+		originalExt := filepath.Ext(name)
+		ext := strings.ToLower(originalExt)
 		if ext != ".yaml" && ext != ".yml" {
 			continue
 		}
-		clusterName := strings.TrimSuffix(name, filepath.Ext(name))
+		clusterName := strings.TrimSuffix(name, originalExt)
 		result[clusterName] = filepath.Join(expanded, name)
 	}
 	return result, nil
