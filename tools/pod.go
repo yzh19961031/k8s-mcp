@@ -22,8 +22,14 @@ func RegisterPodTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithNumber("limit", mcp.Description("返回数量上限，默认 20")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster := args["cluster"].(string)
-		namespace := args["namespace"].(string)
+		cluster, ok := args["cluster"].(string)
+		if !ok || cluster == "" {
+			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		}
+		namespace, ok := args["namespace"].(string)
+		if !ok {
+			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
+		}
 		labelSelector, _ := args["label_selector"].(string)
 		limit := 20
 		if l, ok := args["limit"].(float64); ok && l > 0 {
@@ -33,7 +39,7 @@ func RegisterPodTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		return mcp.NewToolResultText(listPodsImpl(client, cluster, namespace, labelSelector, limit)), nil
+		return mcp.NewToolResultText(listPodsImpl(ctx, client, cluster, namespace, labelSelector, limit)), nil
 	})
 
 	// get_pod_logs
@@ -46,9 +52,18 @@ func RegisterPodTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithNumber("tail", mcp.Description("返回最后 N 行，默认 100")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster := args["cluster"].(string)
-		namespace := args["namespace"].(string)
-		pod := args["pod"].(string)
+		cluster, ok := args["cluster"].(string)
+		if !ok || cluster == "" {
+			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		}
+		namespace, ok2 := args["namespace"].(string)
+		if !ok2 {
+			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
+		}
+		pod, ok3 := args["pod"].(string)
+		if !ok3 || pod == "" {
+			return mcp.NewToolResultText(toolError("参数 pod 无效")), nil
+		}
 		container, _ := args["container"].(string)
 		tail := int64(100)
 		if t, ok := args["tail"].(float64); ok && t > 0 {
@@ -69,19 +84,28 @@ func RegisterPodTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithString("name", mcp.Required(), mcp.Description("Pod 名称")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster := args["cluster"].(string)
-		namespace := args["namespace"].(string)
-		name := args["name"].(string)
+		cluster, ok := args["cluster"].(string)
+		if !ok || cluster == "" {
+			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		}
+		namespace, ok2 := args["namespace"].(string)
+		if !ok2 {
+			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
+		}
+		name, ok3 := args["name"].(string)
+		if !ok3 || name == "" {
+			return mcp.NewToolResultText(toolError("参数 name 无效")), nil
+		}
 		client, err := mgr.Get(cluster)
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		return mcp.NewToolResultText(describePodImpl(client, cluster, namespace, name)), nil
+		return mcp.NewToolResultText(describePodImpl(ctx, client, cluster, namespace, name)), nil
 	})
 }
 
-func listPodsImpl(client kubernetes.Interface, cluster, namespace, labelSelector string, limit int) string {
-	pods, err := client.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+func listPodsImpl(ctx context.Context, client kubernetes.Interface, cluster, namespace, labelSelector string, limit int) string {
+	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 		Limit:         int64(limit),
 	})
@@ -132,8 +156,8 @@ func getPodLogsImpl(ctx context.Context, client kubernetes.Interface, cluster, n
 	})
 }
 
-func describePodImpl(client kubernetes.Interface, cluster, namespace, name string) string {
-	p, err := client.CoreV1().Pods(namespace).Get(context.Background(), name, metav1.GetOptions{})
+func describePodImpl(ctx context.Context, client kubernetes.Interface, cluster, namespace, name string) string {
+	p, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return toolError(fmt.Sprintf("get pod 失败: %v", err))
 	}

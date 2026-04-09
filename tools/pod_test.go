@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -40,7 +41,7 @@ func TestListPodsImpl(t *testing.T) {
 
 	fc := fake.NewSimpleClientset(&pod1, &pod2)
 
-	result := listPodsImpl(fc, "prod", "default", "", 20)
+	result := listPodsImpl(context.Background(), fc, "prod", "default", "", 20)
 
 	var r PodListResult
 	if err := json.Unmarshal([]byte(result), &r); err != nil {
@@ -58,7 +59,7 @@ func TestDescribePodImpl(t *testing.T) {
 	pod := makePod("web-1", "default", "Running", 1, 1, 0, "node-1")
 	fc := fake.NewSimpleClientset(&pod)
 
-	result := describePodImpl(fc, "prod", "default", "web-1")
+	result := describePodImpl(context.Background(), fc, "prod", "default", "web-1")
 
 	var r PodDetail
 	if err := json.Unmarshal([]byte(result), &r); err != nil {
@@ -69,5 +70,24 @@ func TestDescribePodImpl(t *testing.T) {
 	}
 	if r.Cluster != "prod" {
 		t.Errorf("expected cluster=prod, got %s", r.Cluster)
+	}
+}
+
+func TestGetPodLogsImpl(t *testing.T) {
+	pod := makePod("web-1", "default", "Running", 1, 1, 0, "node-1")
+	fc := fake.NewSimpleClientset(&pod)
+
+	result := getPodLogsImpl(context.Background(), fc, "prod", "default", "web-1", "", 100)
+
+	// fake client 返回空日志，但 JSON 结构应合法
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &m); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, result)
+	}
+	// 应包含必要字段
+	for _, key := range []string{"cluster", "namespace", "pod", "tail", "logs"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("expected key %q in result", key)
+		}
 	}
 }
