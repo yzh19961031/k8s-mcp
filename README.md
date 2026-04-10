@@ -8,7 +8,7 @@
 
 - **多集群支持**：支持 kubeconfig 目录扫描和 token 两种接入方式，并发初始化连接
 - **结构化返回**：所有工具返回 JSON 摘要而非原始 K8s 对象，减少 context 污染
-- **13 个 MCP 工具**：覆盖集群查询、Pod 操作、Deployment 管理、事件查看、通用资源操作
+- **16 个 MCP 工具**：覆盖集群查询、Pod 操作、Deployment 管理、事件查看、通用资源操作
 - **只读/写操作分离**：查询类和写操作类工具分开，安全可控
 - **热重载**：支持新增集群 kubeconfig 后不重启服务（`Reload` 方法）
 
@@ -27,12 +27,15 @@
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `list_namespaces` | cluster | 列出命名空间 |
+| `list_resource_quotas` | cluster, namespace | 列出命名空间的 ResourceQuota 及用量 |
 | `list_nodes` | cluster | 列出节点及状态 |
 | `describe_node` | cluster, name | 节点详情（容量/条件/地址） |
 | `list_pods` | cluster, namespace, label_selector?, limit? | 列出 Pod 摘要 |
-| `get_pod_logs` | cluster, namespace, pod, container?, tail? | 获取容器日志 |
+| `get_pod_logs` | cluster, namespace, pod, container?, tail?, previous? | 获取容器日志（previous=true 获取已终止容器历史日志） |
+| `exec_pod` | cluster, namespace, pod, command, container? | 在容器内执行命令 |
 | `describe_pod` | cluster, namespace, name | Pod 详情（容器状态/条件） |
 | `list_deployments` | cluster, namespace | 列出 Deployment |
+| `list_resources` | cluster, kind, namespace?, label_selector?, limit? | 通用资源列表（Service / Ingress / PVC / ConfigMap / StatefulSet 等） |
 | `describe_resource` | cluster, namespace, kind, name | 通用资源描述（支持任意 Kind） |
 | `get_events` | cluster, namespace?, limit? | 获取 K8s 事件 |
 
@@ -163,17 +166,18 @@ k8s-mcp/
 │   ├── loader.go        # kubeconfig 目录扫描
 │   └── token_loader.go  # token 配置文件解析
 ├── k8s/
-│   └── manager.go       # 多集群连接池（并发初始化、Get/Reload）
+│   ├── manager.go       # 多集群连接池（并发初始化、Get/Reload）
+│   └── dynamic_cache.go # DynamicClientCache（按集群缓存 dynamic client + RESTMapper）
 └── tools/
     ├── types.go         # 所有返回结构体定义
-    ├── helpers.go       # 公共辅助函数（ageString/toJSON/toolError）
+    ├── helpers.go       # 公共辅助函数（ageString/toJSON/toolError/mustString/getClusterClient）
     ├── cluster.go       # list_clusters
-    ├── namespace.go     # list_namespaces
+    ├── namespace.go     # list_namespaces / list_resource_quotas
     ├── node.go          # list_nodes / describe_node
-    ├── pod.go           # list_pods / get_pod_logs / describe_pod
+    ├── pod.go           # list_pods / get_pod_logs / exec_pod / describe_pod
     ├── deployment.go    # list_deployments / scale_deployment
     ├── event.go         # get_events
-    └── resource.go      # describe_resource / apply_manifest / delete_resource
+    └── resource.go      # list_resources / describe_resource / apply_manifest / delete_resource
 ```
 
 ---
@@ -198,6 +202,7 @@ go mod tidy
 - 日志工具支持 `tail` 参数，默认 100
 - 返回 JSON 而非 YAML，不含 `managedFields` 等噪音字段
 - `impl` 函数（如 `listPodsImpl`）独立于 MCP 框架，便于单元测试
+- `list_resources` 通用工具支持任意 kind（Service / Ingress / PVC / ConfigMap / StatefulSet 等），替代各类型专属 list 工具
 
 ---
 
