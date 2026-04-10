@@ -320,23 +320,27 @@ func podDisplayStatus(p corev1.Pod) string {
 
 	// 2. Init 容器未完成
 	for i, cs := range p.Status.InitContainerStatuses {
+		// 已正常完成的 init container 跳过
 		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode == 0 {
-			continue // 已正常完成
+			continue
 		}
+		// Waiting 状态：直接用 reason（CrashLoopBackOff、ImagePullBackOff 等）
 		if cs.State.Waiting != nil {
 			reason := cs.State.Waiting.Reason
 			if reason != "" && reason != "PodInitializing" {
 				return "Init:" + reason
 			}
+			// PodInitializing 或空 reason → 显示进度
+			return fmt.Sprintf("Init:%d/%d", i, len(p.Spec.InitContainers))
 		}
+		// Terminated 且非正常退出
 		if cs.State.Terminated != nil {
-			if cs.State.Terminated.ExitCode != 0 {
-				return fmt.Sprintf("Init:ExitCode:%d", cs.State.Terminated.ExitCode)
+			if cs.State.Terminated.Reason != "" {
+				return "Init:" + cs.State.Terminated.Reason
 			}
+			return fmt.Sprintf("Init:ExitCode:%d", cs.State.Terminated.ExitCode)
 		}
-		if cs.RestartCount > 0 {
-			return "Init:CrashLoopBackOff"
-		}
+		// 既没有 Waiting 也没有 Terminated（Running 状态，理论上不该出现在 init container 卡住的情况）
 		return fmt.Sprintf("Init:%d/%d", i, len(p.Spec.InitContainers))
 	}
 

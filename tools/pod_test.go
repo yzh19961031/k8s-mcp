@@ -175,6 +175,20 @@ func TestPodDisplayStatus(t *testing.T) {
 			}, "Running"),
 			expected: "Running",
 		},
+		{
+			name: "init exit code error",
+			pod: makePodWithStatus("p", nil, []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 1,
+							Reason:   "Error",
+						},
+					},
+				},
+			}, nil, "Failed"),
+			expected: "Init:Error",
+		},
 	}
 
 	for _, tc := range cases {
