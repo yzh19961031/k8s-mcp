@@ -50,3 +50,38 @@ func TestToJSONError(t *testing.T) {
 		t.Error("expected 'error' key in result")
 	}
 }
+
+func TestMustString_Valid(t *testing.T) {
+	args := map[string]any{"cluster": "prod"}
+	got, err := mustString(args, "cluster")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "prod" {
+		t.Errorf("expected 'prod', got %q", got)
+	}
+}
+
+func TestMustString_Missing(t *testing.T) {
+	args := map[string]any{}
+	_, err := mustString(args, "cluster")
+	if err == nil {
+		t.Fatal("expected error for missing key")
+	}
+}
+
+func TestMustString_Empty(t *testing.T) {
+	args := map[string]any{"cluster": ""}
+	_, err := mustString(args, "cluster")
+	if err == nil {
+		t.Fatal("expected error for empty value")
+	}
+}
+
+func TestMustString_WrongType(t *testing.T) {
+	args := map[string]any{"cluster": 123}
+	_, err := mustString(args, "cluster")
+	if err == nil {
+		t.Fatal("expected error for wrong type")
+	}
+}

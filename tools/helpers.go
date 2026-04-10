@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"k8s.io/client-go/kubernetes"
 )
 
 // ageString 将时间点转换为人类可读的相对时间字符串
@@ -33,4 +35,26 @@ func toJSON(v interface{}) string {
 // toolError 生成标准错误 JSON
 func toolError(msg string) string {
 	return fmt.Sprintf(`{"error":%q}`, msg)
+}
+
+// mustString 从 args 中提取必填字符串参数，为空或类型错误时返回 error
+func mustString(args map[string]any, key string) (string, error) {
+	v, ok := args[key].(string)
+	if !ok || v == "" {
+		return "", fmt.Errorf("参数 %s 无效", key)
+	}
+	return v, nil
+}
+
+// getClusterClient 从 args 提取 cluster 参数并获取对应的 kubernetes.Interface
+func getClusterClient(args map[string]any, mgr ClusterManagerInterface) (kubernetes.Interface, string, error) {
+	cluster, err := mustString(args, "cluster")
+	if err != nil {
+		return nil, "", err
+	}
+	client, err := mgr.Get(cluster)
+	if err != nil {
+		return nil, "", err
+	}
+	return client, cluster, nil
 }
