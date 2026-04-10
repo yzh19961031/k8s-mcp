@@ -54,6 +54,7 @@ func RegisterPodTools(s *server.MCPServer, mgr ResourceManagerInterface) {
 		mcp.WithString("pod", mcp.Required(), mcp.Description("Pod 名称")),
 		mcp.WithString("container", mcp.Description("容器名称，多容器时必填")),
 		mcp.WithNumber("tail", mcp.Description("返回最后 N 行，默认 100")),
+		mcp.WithString("previous", mcp.Description("为 true 时获取已终止容器的历史日志")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
 		cluster, ok := args["cluster"].(string)
@@ -73,11 +74,15 @@ func RegisterPodTools(s *server.MCPServer, mgr ResourceManagerInterface) {
 		if t, ok := args["tail"].(float64); ok && t > 0 {
 			tail = int64(t)
 		}
+		previous := false
+		if p, ok := args["previous"].(string); ok && p == "true" {
+			previous = true
+		}
 		client, err := mgr.Get(cluster)
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		return mcp.NewToolResultText(getPodLogsImpl(ctx, client, cluster, namespace, pod, container, tail)), nil
+		return mcp.NewToolResultText(getPodLogsImpl(ctx, client, cluster, namespace, pod, container, tail, previous)), nil
 	})
 
 	// exec_pod
@@ -163,7 +168,7 @@ func listPodsImpl(ctx context.Context, client kubernetes.Interface, cluster, nam
 		items = append(items, PodBrief{
 			Name:      p.Name,
 			Namespace: p.Namespace,
-			Status:    string(p.Status.Phase),
+			Status:    podDisplayStatus(p),
 			Ready:     fmt.Sprintf("%d/%d", ready, total),
 			Restarts:  restarts,
 			Age:       ageString(p.CreationTimestamp.Time),
@@ -179,8 +184,8 @@ func listPodsImpl(ctx context.Context, client kubernetes.Interface, cluster, nam
 	})
 }
 
-func getPodLogsImpl(ctx context.Context, client kubernetes.Interface, cluster, namespace, pod, container string, tail int64) string {
-	opts := &corev1.PodLogOptions{TailLines: &tail}
+func getPodLogsImpl(ctx context.Context, client kubernetes.Interface, cluster, namespace, pod, container string, tail int64, previous bool) string {
+	opts := &corev1.PodLogOptions{TailLines: &tail, Previous: previous}
 	if container != "" {
 		opts.Container = container
 	}
@@ -304,4 +309,53 @@ func containerState(cs corev1.ContainerStatus) string {
 		return "Terminated: " + cs.State.Terminated.Reason
 	}
 	return "Unknown"
+}
+
+// podDisplayStatus 返回与 kubectl 一致的 Pod 状态字符串
+func podDisplayStatus(p corev1.Pod) string {
+	// 1. 正在删除
+	if p.DeletionTimestamp != nil {
+		return "Terminating"
+	}
+
+	// 2. Init 容器未完成
+	for i, cs := range p.Status.InitContainerStatuses {
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode == 0 {
+			continue // 已正常完成
+		}
+		if cs.State.Waiting != nil {
+			reason := cs.State.Waiting.Reason
+			if reason != "" && reason != "PodInitializing" {
+				return "Init:" + reason
+			}
+		}
+		if cs.State.Terminated != nil {
+			if cs.State.Terminated.ExitCode != 0 {
+				return fmt.Sprintf("Init:ExitCode:%d", cs.State.Terminated.ExitCode)
+			}
+		}
+		if cs.RestartCount > 0 {
+			return "Init:CrashLoopBackOff"
+		}
+		return fmt.Sprintf("Init:%d/%d", i, len(p.Spec.InitContainers))
+	}
+
+	// 3. 普通容器状态
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
+			return cs.State.Waiting.Reason
+		}
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode != 0 {
+			if cs.State.Terminated.Reason != "" {
+				return cs.State.Terminated.Reason
+			}
+			return "Error"
+		}
+	}
+
+	// 4. 兜底
+	if p.Status.Phase == "" {
+		return "Unknown"
+	}
+	return string(p.Status.Phase)
 }
