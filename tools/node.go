@@ -18,12 +18,7 @@ func RegisterNodeTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithDescription("列出指定集群的所有节点及状态"),
 		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
-		}
-		client, err := mgr.Get(cluster)
+		client, cluster, err := getClusterClient(req.GetArguments(), mgr)
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
@@ -36,15 +31,11 @@ func RegisterNodeTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithString("name", mcp.Required(), mcp.Description("节点名称")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		client, cluster, err := getClusterClient(args, mgr)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		name, ok2 := args["name"].(string)
-		if !ok2 || name == "" {
-			return mcp.NewToolResultText(toolError("参数 name 无效")), nil
-		}
-		client, err := mgr.Get(cluster)
+		name, err := mustString(args, "name")
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}

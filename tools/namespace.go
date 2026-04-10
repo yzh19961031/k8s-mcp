@@ -18,15 +18,11 @@ func RegisterNamespaceTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		client, cluster, err := getClusterClient(args, mgr)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		namespace, ok2 := args["namespace"].(string)
-		if !ok2 || namespace == "" {
-			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
-		}
-		client, err := mgr.Get(cluster)
+		namespace, err := mustString(args, "namespace")
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
@@ -37,12 +33,7 @@ func RegisterNamespaceTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithDescription("列出指定集群的所有命名空间"),
 		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
-		}
-		client, err := mgr.Get(cluster)
+		client, cluster, err := getClusterClient(req.GetArguments(), mgr)
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}

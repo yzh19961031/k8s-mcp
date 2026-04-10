@@ -10,44 +10,19 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// RegisterDeploymentTools 注册 Deployment / ReplicaSet 相关 MCP 工具
+// RegisterDeploymentTools 注册 Deployment 相关 MCP 工具
 func RegisterDeploymentTools(s *server.MCPServer, mgr ClusterManagerInterface) {
-	s.AddTool(mcp.NewTool("list_replicasets",
-		mcp.WithDescription("列出指定集群和命名空间的 ReplicaSet"),
-		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
-		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
-		}
-		namespace, ok2 := args["namespace"].(string)
-		if !ok2 {
-			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
-		}
-		client, err := mgr.Get(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
-		return mcp.NewToolResultText(listReplicaSetsImpl(ctx, client, cluster, namespace)), nil
-	})
-
 	s.AddTool(mcp.NewTool("list_deployments",
 		mcp.WithDescription("列出指定集群和命名空间的 Deployment"),
 		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		client, cluster, err := getClusterClient(args, mgr)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		namespace, ok2 := args["namespace"].(string)
-		if !ok2 {
-			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
-		}
-		client, err := mgr.Get(cluster)
+		namespace, err := mustString(args, "namespace")
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
@@ -62,58 +37,23 @@ func RegisterDeploymentTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithNumber("replicas", mcp.Required(), mcp.Description("目标副本数")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
-		}
-		namespace, ok2 := args["namespace"].(string)
-		if !ok2 {
-			return mcp.NewToolResultText(toolError("参数 namespace 无效")), nil
-		}
-		name, ok3 := args["name"].(string)
-		if !ok3 || name == "" {
-			return mcp.NewToolResultText(toolError("参数 name 无效")), nil
-		}
-		replicasF, ok4 := args["replicas"].(float64)
-		if !ok4 {
-			return mcp.NewToolResultText(toolError("参数 replicas 无效")), nil
-		}
-		replicas := int32(replicasF)
-		client, err := mgr.Get(cluster)
+		client, cluster, err := getClusterClient(args, mgr)
 		if err != nil {
 			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		return mcp.NewToolResultText(scaleDeploymentImpl(ctx, client, cluster, namespace, name, replicas)), nil
-	})
-}
-
-func listReplicaSetsImpl(ctx context.Context, client kubernetes.Interface, cluster, namespace string) string {
-	rsList, err := client.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return toolError(fmt.Sprintf("list replicasets 失败: %v", err))
-	}
-
-	items := make([]ReplicaSetBrief, 0, len(rsList.Items))
-	for _, rs := range rsList.Items {
-		desired := int32(0)
-		if rs.Spec.Replicas != nil {
-			desired = *rs.Spec.Replicas
+		namespace, err := mustString(args, "namespace")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
-		items = append(items, ReplicaSetBrief{
-			Name:      rs.Name,
-			Namespace: rs.Namespace,
-			Desired:   desired,
-			Ready:     rs.Status.ReadyReplicas,
-			Available: rs.Status.AvailableReplicas,
-			Age:       ageString(rs.CreationTimestamp.Time),
-		})
-	}
-
-	return toJSON(ReplicaSetListResult{
-		Cluster:   cluster,
-		Namespace: namespace,
-		Total:     len(items),
-		Items:     items,
+		name, err := mustString(args, "name")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		replicasF, ok := args["replicas"].(float64)
+		if !ok {
+			return mcp.NewToolResultText(toolError("参数 replicas 无效")), nil
+		}
+		return mcp.NewToolResultText(scaleDeploymentImpl(ctx, client, cluster, namespace, name, int32(replicasF))), nil
 	})
 }
 

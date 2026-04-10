@@ -22,9 +22,9 @@ func RegisterEventTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		mcp.WithString("involved_object_name", mcp.Description("按资源名称过滤，如 my-pod-abc123")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
+		client, cluster, err := getClusterClient(args, mgr)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
 		}
 		namespace, _ := args["namespace"].(string)
 		limit := 20
@@ -33,10 +33,6 @@ func RegisterEventTools(s *server.MCPServer, mgr ClusterManagerInterface) {
 		}
 		involvedKind, _ := args["involved_object_kind"].(string)
 		involvedName, _ := args["involved_object_name"].(string)
-		client, err := mgr.Get(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
 		return mcp.NewToolResultText(getEventsImpl(ctx, client, cluster, namespace, involvedKind, involvedName, limit)), nil
 	})
 }
