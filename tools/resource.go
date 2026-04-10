@@ -9,120 +9,19 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/yuanzhihao/k8s-mcp/k8s"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
+	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
-// ResourceManagerInterface 扩展 ClusterManagerInterface，支持获取 rest.Config
-type ResourceManagerInterface interface {
-	ClusterManagerInterface
-	GetConfig(clusterName string) (*rest.Config, error)
-}
-
-// RegisterResourceTools 注册资源操作 MCP 工具
-func RegisterResourceTools(s *server.MCPServer, mgr ResourceManagerInterface) {
-	// describe_resource
-	s.AddTool(mcp.NewTool("describe_resource",
-		mcp.WithDescription("获取任意 K8s 资源的详细信息（通用）"),
-		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
-		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间，集群级资源传空字符串")),
-		mcp.WithString("kind", mcp.Required(), mcp.Description("资源类型，如 Deployment、Service、ConfigMap")),
-		mcp.WithString("name", mcp.Required(), mcp.Description("资源名称")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
-		}
-		namespace, _ := args["namespace"].(string)
-		kind, ok2 := args["kind"].(string)
-		if !ok2 || kind == "" {
-			return mcp.NewToolResultText(toolError("参数 kind 无效")), nil
-		}
-		name, ok3 := args["name"].(string)
-		if !ok3 || name == "" {
-			return mcp.NewToolResultText(toolError("参数 name 无效")), nil
-		}
-
-		cfg, err := mgr.GetConfig(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
-		client, err := mgr.Get(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
-		return mcp.NewToolResultText(describeResourceImpl(ctx, client, cfg, cluster, namespace, kind, name)), nil
-	})
-
-	// apply_manifest
-	s.AddTool(mcp.NewTool("apply_manifest",
-		mcp.WithDescription("应用 YAML 清单到指定集群（server-side apply）"),
-		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
-		mcp.WithString("yaml_content", mcp.Required(), mcp.Description("YAML 或 JSON 格式的资源清单")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
-		}
-		yamlContent, ok2 := args["yaml_content"].(string)
-		if !ok2 || yamlContent == "" {
-			return mcp.NewToolResultText(toolError("参数 yaml_content 无效")), nil
-		}
-
-		cfg, err := mgr.GetConfig(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
-		client, err := mgr.Get(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
-		return mcp.NewToolResultText(applyManifestImpl(ctx, client, cfg, cluster, yamlContent)), nil
-	})
-
-	// delete_resource
-	s.AddTool(mcp.NewTool("delete_resource",
-		mcp.WithDescription("删除指定集群中的 K8s 资源"),
-		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
-		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间，集群级资源传空字符串")),
-		mcp.WithString("kind", mcp.Required(), mcp.Description("资源类型，如 Pod、Deployment")),
-		mcp.WithString("name", mcp.Required(), mcp.Description("资源名称")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := req.GetArguments()
-		cluster, ok := args["cluster"].(string)
-		if !ok || cluster == "" {
-			return mcp.NewToolResultText(toolError("参数 cluster 无效")), nil
-		}
-		namespace, _ := args["namespace"].(string)
-		kind, ok2 := args["kind"].(string)
-		if !ok2 || kind == "" {
-			return mcp.NewToolResultText(toolError("参数 kind 无效")), nil
-		}
-		name, ok3 := args["name"].(string)
-		if !ok3 || name == "" {
-			return mcp.NewToolResultText(toolError("参数 name 无效")), nil
-		}
-
-		cfg, err := mgr.GetConfig(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
-		client, err := mgr.Get(cluster)
-		if err != nil {
-			return mcp.NewToolResultText(toolError(err.Error())), nil
-		}
-		return mcp.NewToolResultText(deleteResourceImpl(ctx, client, cfg, cluster, namespace, kind, name)), nil
-	})
+// noisyAnnotations 是描述资源时需要过滤掉的高噪音 annotation key
+var noisyAnnotations = []string{
+	"kubectl.kubernetes.io/last-applied-configuration",
+	"deployment.kubernetes.io/revision",
 }
 
 // wellKnownGroups 为常见资源类型预设 API Group，避免 discovery mapper 因 Group 为空而匹配失败
@@ -146,58 +45,204 @@ var wellKnownGroups = map[string]string{
 	"volumeattachment":        "storage.k8s.io",
 }
 
-// buildDynamic 创建 dynamic client 并解析 kind 对应的 GVR
-func buildDynamic(client kubernetes.Interface, cfg *rest.Config, kind string) (dynamic.Interface, schema.GroupVersionResource, bool, error) {
-	dynClient, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return nil, schema.GroupVersionResource{}, false, fmt.Errorf("创建 dynamic client 失败: %w", err)
-	}
-
-	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
-	if err != nil {
-		return nil, schema.GroupVersionResource{}, false, fmt.Errorf("创建 discovery client 失败: %w", err)
-	}
-
-	groups, err := restmapper.GetAPIGroupResources(dc)
-	if err != nil {
-		return nil, schema.GroupVersionResource{}, false, fmt.Errorf("获取 API groups 失败: %w", err)
-	}
-
-	rm := restmapper.NewDiscoveryRESTMapper(groups)
+// resolveGVR 通过 RESTMapper 将 kind 字符串解析为 GVR 和是否 namespaced
+func resolveGVR(mapper meta.RESTMapper, kind string) (schema.GroupVersionResource, bool, error) {
 	group := wellKnownGroups[strings.ToLower(kind)]
-	mappings, err := rm.RESTMappings(schema.GroupKind{Group: group, Kind: kind})
+	mappings, err := mapper.RESTMappings(schema.GroupKind{Group: group, Kind: kind})
 	if err != nil || len(mappings) == 0 {
-		return nil, schema.GroupVersionResource{}, false, fmt.Errorf("找不到 Kind %q 的 REST mapping", kind)
+		return schema.GroupVersionResource{}, false, fmt.Errorf("找不到 Kind %q 的 REST mapping", kind)
 	}
-
 	mapping := mappings[0]
-	namespaced := mapping.Scope.Name() == "namespace"
-	return dynClient, mapping.Resource, namespaced, nil
+	return mapping.Resource, mapping.Scope.Name() == "namespace", nil
 }
 
-func describeResourceImpl(ctx context.Context, client kubernetes.Interface, cfg *rest.Config, cluster, namespace, kind, name string) string {
-	dynClient, gvr, namespaced, err := buildDynamic(client, cfg, kind)
+// RegisterResourceTools 注册资源操作 MCP 工具
+func RegisterResourceTools(s *server.MCPServer, cache *k8s.DynamicClientCache) {
+	// list_resources
+	s.AddTool(mcp.NewTool("list_resources",
+		mcp.WithDescription("列出任意 K8s 资源（通用）。支持 Service/Ingress/PersistentVolumeClaim/ConfigMap/StatefulSet/DaemonSet 等所有 Kind"),
+		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
+		mcp.WithString("kind", mcp.Required(), mcp.Description("资源类型，如 Service、Ingress、PersistentVolumeClaim、ConfigMap")),
+		mcp.WithString("namespace", mcp.Description("命名空间，留空查所有命名空间")),
+		mcp.WithString("label_selector", mcp.Description("标签过滤，如 app=nginx")),
+		mcp.WithNumber("limit", mcp.Description("返回数量上限，默认 20")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		cluster, err := mustString(args, "cluster")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		kind, err := mustString(args, "kind")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		namespace, _ := args["namespace"].(string)
+		labelSelector, _ := args["label_selector"].(string)
+		limit := 20
+		if l, ok := args["limit"].(float64); ok && l > 0 {
+			limit = int(l)
+		}
+		entry, err := cache.Get(cluster)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		return mcp.NewToolResultText(listResourcesImpl(ctx, entry, cluster, kind, namespace, labelSelector, limit)), nil
+	})
+
+	// describe_resource
+	s.AddTool(mcp.NewTool("describe_resource",
+		mcp.WithDescription("获取任意 K8s 资源的详细信息（通用）"),
+		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
+		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间，集群级资源传空字符串")),
+		mcp.WithString("kind", mcp.Required(), mcp.Description("资源类型，如 Deployment、Service、ConfigMap")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("资源名称")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		cluster, err := mustString(args, "cluster")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		namespace, _ := args["namespace"].(string)
+		kind, err := mustString(args, "kind")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		name, err := mustString(args, "name")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		entry, err := cache.Get(cluster)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		return mcp.NewToolResultText(describeResourceImpl(ctx, entry, cluster, namespace, kind, name)), nil
+	})
+
+	// apply_manifest
+	s.AddTool(mcp.NewTool("apply_manifest",
+		mcp.WithDescription("应用 YAML 清单到指定集群（server-side apply）"),
+		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
+		mcp.WithString("yaml_content", mcp.Required(), mcp.Description("YAML 或 JSON 格式的资源清单")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		cluster, err := mustString(args, "cluster")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		yamlContent, err := mustString(args, "yaml_content")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		entry, err := cache.Get(cluster)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		return mcp.NewToolResultText(applyManifestImpl(ctx, entry, cluster, yamlContent)), nil
+	})
+
+	// delete_resource
+	s.AddTool(mcp.NewTool("delete_resource",
+		mcp.WithDescription("删除指定集群中的 K8s 资源"),
+		mcp.WithString("cluster", mcp.Required(), mcp.Description("集群名称")),
+		mcp.WithString("namespace", mcp.Required(), mcp.Description("命名空间，集群级资源传空字符串")),
+		mcp.WithString("kind", mcp.Required(), mcp.Description("资源类型，如 Pod、Deployment")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("资源名称")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		cluster, err := mustString(args, "cluster")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		namespace, _ := args["namespace"].(string)
+		kind, err := mustString(args, "kind")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		name, err := mustString(args, "name")
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		entry, err := cache.Get(cluster)
+		if err != nil {
+			return mcp.NewToolResultText(toolError(err.Error())), nil
+		}
+		return mcp.NewToolResultText(deleteResourceImpl(ctx, entry, cluster, namespace, kind, name)), nil
+	})
+}
+
+func listResourcesImpl(ctx context.Context, entry *k8s.DynamicEntry, cluster, kind, namespace, labelSelector string, limit int) string {
+	gvr, namespaced, err := resolveGVR(entry.Mapper, kind)
+	if err != nil {
+		return toolError(err.Error())
+	}
+
+	opts := metav1.ListOptions{LabelSelector: labelSelector, Limit: int64(limit)}
+
+	var list *unstructured.UnstructuredList
+	if namespaced {
+		list, err = entry.Client.Resource(gvr).Namespace(namespace).List(ctx, opts)
+	} else {
+		list, err = entry.Client.Resource(gvr).List(ctx, opts)
+	}
+	if err != nil {
+		return toolError(fmt.Sprintf("list %s 失败: %v", kind, err))
+	}
+
+	items := make([]ResourceBrief, 0, len(list.Items))
+	for _, obj := range list.Items {
+		age := ""
+		ts := obj.GetCreationTimestamp()
+		if !ts.IsZero() {
+			age = ageString(ts.Time)
+		}
+		items = append(items, ResourceBrief{
+			Name:      obj.GetName(),
+			Namespace: obj.GetNamespace(),
+			Age:       age,
+			Labels:    obj.GetLabels(),
+		})
+	}
+
+	return toJSON(ResourceListResult{
+		Cluster:   cluster,
+		Kind:      kind,
+		Namespace: namespace,
+		Total:     len(items),
+		Items:     items,
+	})
+}
+
+func describeResourceImpl(ctx context.Context, entry *k8s.DynamicEntry, cluster, namespace, kind, name string) string {
+	gvr, namespaced, err := resolveGVR(entry.Mapper, kind)
 	if err != nil {
 		return toolError(err.Error())
 	}
 
 	var obj *unstructured.Unstructured
 	if namespaced {
-		obj, err = dynClient.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		obj, err = entry.Client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	} else {
-		obj, err = dynClient.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+		obj, err = entry.Client.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
 	}
 	if err != nil {
 		return toolError(fmt.Sprintf("get resource 失败: %v", err))
 	}
 
-	// 移除噪音字段
+	// 移除 managedFields 噪音
 	unstructured.RemoveNestedField(obj.Object, "metadata", "managedFields")
-	unstructured.RemoveNestedField(obj.Object, "metadata", "annotations")
+
+	// 过滤高噪音 annotation，保留业务 annotation（如 hami.io/*）
+	if annots, ok, _ := unstructured.NestedStringMap(obj.Object, "metadata", "annotations"); ok {
+		for _, key := range noisyAnnotations {
+			delete(annots, key)
+		}
+		_ = unstructured.SetNestedStringMap(obj.Object, annots, "metadata", "annotations")
+	}
 
 	spec, _, _ := unstructured.NestedMap(obj.Object, "spec")
 	status, _, _ := unstructured.NestedMap(obj.Object, "status")
 	labels, _, _ := unstructured.NestedStringMap(obj.Object, "metadata", "labels")
+	annots, _, _ := unstructured.NestedStringMap(obj.Object, "metadata", "annotations")
 
 	age := ""
 	if creationTime, ok, _ := unstructured.NestedString(obj.Object, "metadata", "creationTimestamp"); ok {
@@ -206,20 +251,20 @@ func describeResourceImpl(ctx context.Context, client kubernetes.Interface, cfg 
 		}
 	}
 
-	return toJSON(ResourceDetail{
-		Cluster:   cluster,
-		Kind:      kind,
-		Namespace: namespace,
-		Name:      name,
-		Age:       age,
-		Labels:    labels,
-		Spec:      spec,
-		Status:    status,
+	return toJSON(map[string]interface{}{
+		"cluster":     cluster,
+		"kind":        kind,
+		"namespace":   namespace,
+		"name":        name,
+		"age":         age,
+		"labels":      labels,
+		"annotations": annots,
+		"spec":        spec,
+		"status":      status,
 	})
 }
 
-func applyManifestImpl(ctx context.Context, client kubernetes.Interface, cfg *rest.Config, cluster, yamlContent string) string {
-	// 解析 YAML/JSON 为 unstructured
+func applyManifestImpl(ctx context.Context, entry *k8s.DynamicEntry, cluster, yamlContent string) string {
 	obj := &unstructured.Unstructured{}
 	dec := k8syaml.NewYAMLOrJSONDecoder(strings.NewReader(yamlContent), 4096)
 	if err := dec.Decode(&obj.Object); err != nil {
@@ -231,7 +276,7 @@ func applyManifestImpl(ctx context.Context, client kubernetes.Interface, cfg *re
 		return toolError("YAML 中缺少 kind 字段")
 	}
 
-	dynClient, gvr, namespaced, err := buildDynamic(client, cfg, kind)
+	gvr, namespaced, err := resolveGVR(entry.Mapper, kind)
 	if err != nil {
 		return toolError(err.Error())
 	}
@@ -241,15 +286,15 @@ func applyManifestImpl(ctx context.Context, client kubernetes.Interface, cfg *re
 		return toolError(fmt.Sprintf("序列化对象失败: %v", err))
 	}
 
-	var result *unstructured.Unstructured
 	force := true
+	var result *unstructured.Unstructured
 	if namespaced {
-		result, err = dynClient.Resource(gvr).Namespace(obj.GetNamespace()).Patch(
+		result, err = entry.Client.Resource(gvr).Namespace(obj.GetNamespace()).Patch(
 			ctx, obj.GetName(), types.ApplyPatchType, data,
 			metav1.PatchOptions{FieldManager: "k8s-mcp", Force: &force},
 		)
 	} else {
-		result, err = dynClient.Resource(gvr).Patch(
+		result, err = entry.Client.Resource(gvr).Patch(
 			ctx, obj.GetName(), types.ApplyPatchType, data,
 			metav1.PatchOptions{FieldManager: "k8s-mcp", Force: &force},
 		)
@@ -268,16 +313,16 @@ func applyManifestImpl(ctx context.Context, client kubernetes.Interface, cfg *re
 	})
 }
 
-func deleteResourceImpl(ctx context.Context, client kubernetes.Interface, cfg *rest.Config, cluster, namespace, kind, name string) string {
-	dynClient, gvr, namespaced, err := buildDynamic(client, cfg, kind)
+func deleteResourceImpl(ctx context.Context, entry *k8s.DynamicEntry, cluster, namespace, kind, name string) string {
+	gvr, namespaced, err := resolveGVR(entry.Mapper, kind)
 	if err != nil {
 		return toolError(err.Error())
 	}
 
 	if namespaced {
-		err = dynClient.Resource(gvr).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+		err = entry.Client.Resource(gvr).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	} else {
-		err = dynClient.Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
+		err = entry.Client.Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
 	}
 	if err != nil {
 		return toolError(fmt.Sprintf("delete resource 失败: %v", err))

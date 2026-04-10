@@ -27,13 +27,15 @@ func main() {
 		server.WithToolCapabilities(true),
 	)
 
+	dynCache := k8s.NewDynamicClientCache(mgr)
+
 	tools.RegisterClusterTools(s, mgr)
 	tools.RegisterPodTools(s, mgr)
 	tools.RegisterNamespaceTools(s, mgr)
 	tools.RegisterNodeTools(s, mgr)
 	tools.RegisterDeploymentTools(s, mgr)
 	tools.RegisterEventTools(s, mgr)
-	tools.RegisterResourceTools(s, mgr)
+	tools.RegisterResourceTools(s, dynCache)
 
 	log.Printf("k8s-mcp server 启动，已加载集群: %v", mgr.ListNames())
 

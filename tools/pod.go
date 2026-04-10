@@ -15,6 +15,12 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
+// ResourceManagerInterface 扩展 ClusterManagerInterface，支持获取 rest.Config
+type ResourceManagerInterface interface {
+	ClusterManagerInterface
+	GetConfig(clusterName string) (*rest.Config, error)
+}
+
 // RegisterPodTools 注册 Pod 相关 MCP 工具
 func RegisterPodTools(s *server.MCPServer, mgr ResourceManagerInterface) {
 	// list_pods
